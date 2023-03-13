@@ -400,9 +400,22 @@ try:
             #     if args.video_scale != 1:
             #         del video_frame
 
-            if True: #args.visualize != 0; since args.visualize = 1
-                cv2.imshow('OpenSeeFace Visualization', frame)
-                if cv2.waitKey(1) & 0xFF == ord('q'):
+
+            # Wendi Notes: 
+            # f.contour or faces.contour is 3d array of yellow dot coordinates
+            # f.face_3d or faces.face_3d or tracker.face_3d contains green dots
+            # contour and face_3d are set constants that do not change, maybe is used after modification
+            # Some variables in f that changes: bbox, conf, coord, current_features, euler, eye_state, frame_count
+            #           lms, pnp_error, pts_3d, quaternion, rotation, translation
+
+            # f.pts_3d is 3d array of changing coordinates 
+            # Kind of like an array storing 60~ points each in [x,y,z]
+            print("pts_3d: ", f.pts_3d)
+
+        
+            if True: #args.visualize != 0; since args.visualize = 1  # Comment this line out to disable the video
+                cv2.imshow('OpenSeeFace Visualization', frame) # Comment this line out to disable the video
+                if cv2.waitKey(1) & 0xFF == ord('q'): # Comment this line out to disable the video [Also comment out line 463]
                     # if args.dump_points != "" and not faces is None and len(faces) > 0:
                     #     np.set_printoptions(threshold=sys.maxsize, precision=15)
                     #     pairs = [
@@ -448,7 +461,7 @@ try:
                     #     points[30, :] = 0.0
                     #     with open(args.dump_points, "w") as fh:
                     #         fh.write(repr(points))
-                    break
+                    break   # Comment this line out to disable the video
                     
             failures = 0
         except Exception as e:
