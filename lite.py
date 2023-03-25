@@ -494,7 +494,7 @@ def solve_features(pts):
     features[0] = abs((np.mean([f_pts[0,1], f_pts[1,1]]) - np.mean([f_pts[2,1], f_pts[3,1]])) / norm_distance_y)
     # 01 eye_r
     a2, f_pts = align_points(pts[36], pts[39], pts[[37, 38, 41, 40]]) 
-    features[2] = abs((np.mean([f_pts[0,1], f_pts[1,1]]) - np.mean([f_pts[2,1], f_pts[3,1]])) / norm_distance_y)
+    features[1] = abs((np.mean([f_pts[0,1], f_pts[1,1]]) - np.mean([f_pts[2,1], f_pts[3,1]])) / norm_distance_y)
     
     a3, _ = align_points(pts[0], pts[16], [])
     a4, _ = align_points(pts[31], pts[35], [])
