@@ -1,9 +1,17 @@
 # System files
 .*
 
+# Project related
+*.jpg
+
 # Python
 __pycache__/
 htmlcov/
+
+# Cython
+*.html
+utils.h
+utils.cpp
 
 # Prerequisites
 *.d
