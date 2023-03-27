@@ -112,3 +112,27 @@ def landmarks(tensor, crop_info):
    
     return (np.average(t_conf), np.array(lms))
 
+cdef _matrix_to_quaternion(np.ndarray[np.float32_t, ndim=2] m):
+    cdef float t = 0
+    cdef float q[4]
+    cdef float[:] q_view = q
+
+    if m[2,2] < 0:
+        if m[0,0] > m[1,1]:
+            t = 1 + m[0,0] - m[1,1] - m[2,2]
+            q = [t, m[0,1]+m[1,0], m[2,0]+m[0,2], m[1,2]-m[2,1]]
+        else:
+            t = 1 - m[0,0] + m[1,1] - m[2,2]
+            q = [m[0,1]+m[1,0], t, m[1,2]+m[2,1], m[2,0]-m[0,2]]
+    else:
+        if m[0,0] < -m[1,1]:
+            t = 1 - m[0,0] - m[1,1] + m[2,2]
+            q = [m[2,0]+m[0,2], m[1,2]+m[2,1], t, m[0,1]-m[1,0]]
+        else:
+            t = 1 + m[0,0] + m[1,1] + m[2,2]
+            q = [m[1,2]-m[2,1], m[2,0]-m[0,2], m[0,1]-m[1,0], t]
+    
+    return np.asarray(q_view) * 0.5 / np.sqrt(t)
+
+def matrix_to_quaternion(m):
+    return _matrix_to_quaternion(m)

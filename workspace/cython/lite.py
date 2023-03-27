@@ -232,28 +232,7 @@ def visualize(frame, face):
 from utils import clamp_to_im
 from utils import preprocess
 from utils import landmarks
-
-
-
-def matrix_to_quaternion(m):
-    t = 0.0
-    q = [0.0, 0.0, 0, 0.0]
-    if m[2,2] < 0:
-        if m[0,0] > m[1,1]:
-            t = 1 + m[0,0] - m[1,1] - m[2,2]
-            q = [t, m[0,1]+m[1,0], m[2,0]+m[0,2], m[1,2]-m[2,1]]
-        else:
-            t = 1 - m[0,0] + m[1,1] - m[2,2]
-            q = [m[0,1]+m[1,0], t, m[1,2]+m[2,1], m[2,0]-m[0,2]]
-    else:
-        if m[0,0] < -m[1,1]:
-            t = 1 - m[0,0] - m[1,1] + m[2,2]
-            q = [m[2,0]+m[0,2], m[1,2]+m[2,1], t, m[0,1]-m[1,0]]
-        else:
-            t = 1 + m[0,0] + m[1,1] + m[2,2]
-            q = [m[1,2]-m[2,1], m[2,0]-m[0,2], m[0,1]-m[1,0], t]
-    q = np.array(q, np.float32) * 0.5 / np.sqrt(t)
-    return q
+from utils import matrix_to_quaternion
 
 def angle(p1, p2):
     p1 = np.array(p1)
