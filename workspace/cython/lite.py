@@ -229,59 +229,11 @@ def visualize(frame, face):
     cv2.imshow("OpenSeeFace-Lite Visualization", visual)
     cv2.waitKey(0)
 
-def clamp_to_im(pt, w, h):
-    x = pt[0]
-    y = pt[1]
-    if x < 0:
-        x = 0
-    if y < 0:
-        y = 0
-    if x >= w:
-        x = w-1
-    if y >= h:
-        y = h-1
-    return (int(x), int(y+1))
-
+from utils import clamp_to_im
 from utils import preprocess
+from utils import landmarks
 
-# def preprocess(im, crop):
-#     x1, y1, x2, y2 = crop
-#     im = np.float32(im[y1:y2, x1:x2,::-1]) # Crop and BGR to RGB
-#     im = cv2.resize(im, (int(res), int(res)), interpolation=cv2.INTER_LINEAR) * std_res + mean_res
-#     im = np.expand_dims(im, 0)
-#     im = np.transpose(im, (0,3,1,2))
-#     return im
 
-def logit_arr(p, factor=16.0):
-    p = np.clip(p, 0.0000001, 0.9999999)
-    return np.log(p / (1 - p)) / float(factor)
-
-def landmarks(tensor, crop_info):
-    crop_x1, crop_y1, scale_x, scale_y, _ = crop_info
-    avg_conf = 0
-    res_minus_1 = res - 1
-    c0, c1, c2 = 66, 132, 198
-    if model_type == -1:
-        c0, c1, c2 = 30, 60, 90
-    t_main = tensor[0:c0].reshape((c0,out_res_i * out_res_i))
-    t_m = t_main.argmax(1)
-    indices = np.expand_dims(t_m, 1)
-    t_conf = np.take_along_axis(t_main, indices, 1).reshape((c0,))
-    t_off_x = np.take_along_axis(tensor[c0:c1].reshape((c0,out_res_i * out_res_i)), indices, 1).reshape((c0,))
-    t_off_y = np.take_along_axis(tensor[c1:c2].reshape((c0,out_res_i * out_res_i)), indices, 1).reshape((c0,))
-    t_off_x = res_minus_1 * logit_arr(t_off_x, logit_factor)
-    t_off_y = res_minus_1 * logit_arr(t_off_y, logit_factor)
-    t_x = crop_y1 + scale_y * (res_minus_1 * np.floor(t_m / out_res_i) / out_res + t_off_x)
-    t_y = crop_x1 + scale_x * (res_minus_1 * np.floor(np.mod(t_m, out_res_i)) / out_res + t_off_y)
-    avg_conf = np.average(t_conf)
-    lms = np.stack([t_x, t_y, t_conf], 1)
-    lms[np.isnan(lms).any(axis=1)] = np.array([0.,0.,0.], dtype=np.float32)
-    if model_type == -1:
-        lms = lms[[0,0,1,1,1,2,2,2,3,3,3,4,4,4,5,5,6,7,7,8,8,9,10,10,11,11,12,21,21,21,22,23,23,23,23,23,13,14,14,15,16,16,17,18,18,19,20,20,24,25,25,25,26,26,27,27,27,24,24,28,28,28,26,29,29,29]]
-        part_avg = np.mean(np.partition(lms[:,2],3)[0:3])
-        if part_avg < 0.65:
-            avg_conf = part_avg
-    return (avg_conf, np.array(lms))
 
 def matrix_to_quaternion(m):
     t = 0.0

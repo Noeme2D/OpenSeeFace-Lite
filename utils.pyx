@@ -4,12 +4,6 @@ import numpy as np
 cimport numpy as np
 from libc.string cimport memcpy
 
-cdef extern from "<math.h>":
-    float logf(float x)
-
-cdef extern from "<algorithm>" namespace "std":
-    float clamp[float](float v, float lo, float h)
-
 # http://makerwannabe.blogspot.com/2013/09/calling-opencv-functions-via-cython.html
 
 ctypedef public np.uint8_t[:,:,:] np_im_t
@@ -32,6 +26,14 @@ cdef extern from "opencv2/core/core.hpp" namespace "cv":
         void create(int, int, int)
         void* data
 
+# https://github.com/solivr/cython_opencvMat/blob/master/opencv_mat.pyx
+cdef extern from "Python.h":
+    ctypedef struct PyObject
+    object PyMemoryView_FromBuffer(Py_buffer *view)
+    int PyBuffer_FillInfo(Py_buffer *view, PyObject *obj, void *buf, Py_ssize_t len, int read_only, int infoflags)
+    enum:
+        PyBUF_FULL_RO
+
 # Image normalization constants
 mean = np.float32(np.array([0.485, 0.456, 0.406]))
 std = np.float32(np.array([0.229, 0.224, 0.225]))
@@ -42,31 +44,28 @@ std = 1.0 / std
 mean_224 = np.tile(mean, [224, 224, 1])
 std_224 = np.tile(std, [224, 224, 1])
 
-cdef public tuple[int] clamp_to_im(float x, float y, unsigned int w, unsigned int h):
+cdef int res = 224
+cdef int res_minus_1 = 223
+cdef float out_res = 27
+cdef int out_res_i = 28
+cdef int logit_factor = 16
+cdef int c0 = 66
+cdef int c1 = 132
+cdef int c2 = 198
+
+cdef int _clamp_to_im(float xf, int w):
+    cdef int x = <int>xf
     if x < 0:
         x = 0
-    if y < 0:
-        y = 0
     if x >= w:
         x = w-1
-    if y >= h:
-        y = h-1
     
-    return (int(x), int(y+1))
+    return x
 
-cdef public float logit_arr(float p, float factor):
-    p = clamp[float](p, 0.0000001, 0.9999999)
-    return logf(p / (1-p)) / factor
+def clamp_to_im(pt, w, h):
+    return (_clamp_to_im(pt[0], w), _clamp_to_im(pt[1], h) + 1)
 
-# https://github.com/solivr/cython_opencvMat/blob/master/opencv_mat.pyx
-cdef extern from "Python.h":
-    ctypedef struct PyObject
-    object PyMemoryView_FromBuffer(Py_buffer *view)
-    int PyBuffer_FillInfo(Py_buffer *view, PyObject *obj, void *buf, Py_ssize_t len, int read_only, int infoflags)
-    enum:
-        PyBUF_FULL_RO
-
-cdef public _preprocess(np_im_t im, int x1, int y1, int x2, int y2):
+cdef _preprocess(np_im_t im, int x1, int y1, int x2, int y2):
     cdef np_im_t cropped = im[y1:y2, x1:x2, ::-1]
     cdef int r = y2-y1
     cdef int c = x2-x1
@@ -91,4 +90,25 @@ cdef public _preprocess(np_im_t im, int x1, int y1, int x2, int y2):
 def preprocess(im, crop):
     x1, y1, x2, y2 = crop
     return _preprocess(im, x1, y1, x2, y2)
-    
+
+cdef logit_arr(p, float factor):
+    p = np.clip(p, 0.0000001, 0.9999999)
+    return np.log(p / (1 - p)) / factor
+
+def landmarks(tensor, crop_info):
+    crop_x1, crop_y1, scale_x, scale_y, _ = crop_info
+    t_main = tensor[0:c0].reshape((c0,out_res_i * out_res_i))
+    t_m = t_main.argmax(1)
+    indices = np.expand_dims(t_m, 1)
+    t_conf = np.take_along_axis(t_main, indices, 1).reshape((c0,))
+    t_off_x = np.take_along_axis(tensor[c0:c1].reshape((c0,out_res_i * out_res_i)), indices, 1).reshape((c0,))
+    t_off_y = np.take_along_axis(tensor[c1:c2].reshape((c0,out_res_i * out_res_i)), indices, 1).reshape((c0,))
+    t_off_x = res_minus_1 * logit_arr(t_off_x, logit_factor)
+    t_off_y = res_minus_1 * logit_arr(t_off_y, logit_factor)
+    t_x = crop_y1 + scale_y * (res_minus_1 * np.floor(t_m / out_res_i) / out_res + t_off_x)
+    t_y = crop_x1 + scale_x * (res_minus_1 * np.floor(np.mod(t_m, out_res_i)) / out_res + t_off_y)
+    lms = np.stack([t_x, t_y, t_conf], 1)
+    lms[np.isnan(lms).any(axis=1)] = np.array([0.,0.,0.], dtype=np.float32)
+   
+    return (np.average(t_conf), np.array(lms))
+

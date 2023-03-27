@@ -26,6 +26,7 @@ setup(
         ),
         compiler_directives={
             'language_level': "3",
+            'wraparound': False,
             'boundscheck': False,
             'cdivision': True
         },
