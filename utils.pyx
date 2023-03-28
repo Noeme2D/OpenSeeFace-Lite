@@ -4,6 +4,11 @@ import numpy as np
 cimport numpy as np
 from libc.string cimport memcpy
 
+cdef extern from "<cmath>":
+    float cos(float x)
+    float sin(float x)
+    cdef float M_PI
+
 # http://makerwannabe.blogspot.com/2013/09/calling-opencv-functions-via-cython.html
 
 ctypedef public np.uint8_t[:,:,:] np_im_t
@@ -214,15 +219,15 @@ def matrix_to_quaternion(m):
     return _matrix_to_quaternion(m)
 
 cdef float angle(float x1, float y1, float x2, float y2):
-    return np.arctan2(y2-y1, x2-x1) % (2*np.pi)
+    return np.arctan2(y2-y1, x2-x1) % (2*M_PI)
 
 def normalize_pts3d(pts_3d):
     # Calculate angle using nose
     pts_3d[:, 0:2] -= pts_3d[30, 0:2]
     alpha = angle(pts_3d[30][0], pts_3d[30][1], pts_3d[27][0], pts_3d[27][1])
-    alpha -= 0.5 * np.pi
+    alpha -= 0.5 * M_PI
 
-    R = [[np.cosf(alpha), -np.sinf(alpha)], [np.sinf(alpha), np.cosf(alpha)]]
+    R = [[cos(alpha), -sin(alpha)], [sin(alpha), cos(alpha)]]
     pts_3d[:, 0:2] = (pts_3d - pts_3d[30])[:, 0:2].dot(R) + pts_3d[30, 0:2]
 
     # Vertical scale
