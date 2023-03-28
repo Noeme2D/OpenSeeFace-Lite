@@ -2,7 +2,6 @@
 
 import numpy as np
 cimport numpy as np
-from libc.string cimport memcpy
 
 cdef extern from "<cmath>":
     float cos(float x)
@@ -152,10 +151,10 @@ cdef resize_for_model(np_im_t im):
     cdef int r = im.shape[0]
     cdef int c = im.shape[1]
     cdef np.ndarray[np.uint8_t, ndim=3, mode='c'] buf = np.ascontiguousarray(im[:,:,::-1], dtype = np.uint8)
-    cdef unsigned int* data = <unsigned int*> buf.data
+
     cdef Mat input_mat
     input_mat.create(r, c, CV_8UC3)
-    memcpy(input_mat.data, data, r*c*3)
+    input_mat.data = <unsigned char *>buf.data
 
     cdef Mat output_mat
     resize(input_mat, output_mat, Size(MODEL_RES, MODEL_RES), 0, 0, INTER_LINEAR)
