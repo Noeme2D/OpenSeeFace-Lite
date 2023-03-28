@@ -39,6 +39,8 @@ cdef extern from "Python.h":
     enum:
         PyBUF_FULL_RO
 
+cdef int MODEL_RES = 224
+
 # Image normalization constants
 mean = np.float32(np.array([0.485, 0.456, 0.406]))
 std = np.float32(np.array([0.229, 0.224, 0.225]))
@@ -146,26 +148,33 @@ cdef int _clamp_to_im(float xf, int w):
 def clamp_to_im(pt, w, h):
     return (_clamp_to_im(pt[0], w), _clamp_to_im(pt[1], h) + 1)
 
+cdef resize_for_model(np_im_t im):
+    cdef int r = im.shape[0]
+    cdef int c = im.shape[1]
+    cdef np.ndarray[np.uint8_t, ndim=3, mode='c'] buf = np.ascontiguousarray(im[:,:,::-1], dtype = np.uint8)
+    cdef unsigned int* data = <unsigned int*> buf.data
+    cdef Mat input_mat
+    input_mat.create(r, c, CV_8UC3)
+    memcpy(input_mat.data, data, r*c*3)
+
+    cdef Mat output_mat
+    resize(input_mat, output_mat, Size(MODEL_RES, MODEL_RES), 0, 0, INTER_LINEAR)
+
+    cdef Py_buffer output_buf
+    PyBuffer_FillInfo(&output_buf, NULL, output_mat.data, MODEL_RES*MODEL_RES*3, 1, PyBUF_FULL_RO)
+    Pydata = PyMemoryView_FromBuffer(&output_buf)
+    out = np.asarray(np.ndarray((MODEL_RES, MODEL_RES, 3), buffer=Pydata, order='c', dtype=np.uint8)) * std_224 + mean_224
+    
+    return out
+
 cdef _preprocess(np_im_t im, int x1, int y1, int x2, int y2):
     cdef np_im_t cropped = im[y1:y2, x1:x2, ::-1]
     cdef int r = y2-y1
     cdef int c = x2-x1
 
-    cdef np.ndarray[np.uint8_t, ndim=3, mode='c'] cropped_buf = np.ascontiguousarray(cropped, dtype = np.uint8)
-    cdef unsigned int* cropped_data = <unsigned int*> cropped_buf.data
-    cdef Mat input_mat
-    input_mat.create(r, c, CV_8UC3)
-    memcpy(input_mat.data, cropped_data, r*c*3)
-
-    cdef Mat output_mat
-    resize(input_mat, output_mat, Size(224, 224), 0, 0, INTER_LINEAR)
-
-    cdef Py_buffer output_buf
-    PyBuffer_FillInfo(&output_buf, NULL, output_mat.data, 224*224*3, 1, PyBUF_FULL_RO)
-    Pydata = PyMemoryView_FromBuffer(&output_buf)
-    out = np.asarray(np.ndarray((224, 224, 3), buffer=Pydata, order='c', dtype=np.uint8)) * std_224 + mean_224
+    resized = resize_for_model(cropped)
     
-    reshaped = np.transpose(np.expand_dims(out.copy(), 0), (0,3,1,2))
+    reshaped = np.transpose(np.expand_dims(resized, 0), (0,3,1,2))
     return reshaped
 
 def preprocess(im, crop):
