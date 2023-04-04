@@ -1,8 +1,10 @@
 # This file is not used by the tracking application and currently outdated
 import torch
 import torch.nn as nn
-import geffnet.mobilenetv3 # geffnet.mobilenetv3._gen_mobilenet_v3 needs to be patched to return the parameters instead of instantiating the network
-from geffnet.efficientnet_builder import round_channels
+import geffnet.mobilenetv3
+from geffnet.config import set_layer_config
+from geffnet.efficientnet_builder import round_channels, decode_arch_def, resolve_act_layer, resolve_bn_args
+from geffnet.activations import get_act_fn, get_act_layer
 
 class DSConv2d(nn.Module):
     def __init__(self, in_planes, out_planes, kernels_per_layer=4, groups=1, old=0):
@@ -47,7 +49,7 @@ class UNetUp(nn.Module):
 # This is the gaze tracking model
 class OpenSeeFaceGaze(geffnet.mobilenetv3.MobileNetV3):
     def __init__(self):
-        kwargs = geffnet.mobilenetv3._gen_mobilenet_v3(['small'])
+        kwargs = get_mobilenetv3_kwargs('small')
         super(OpenSeeFaceGaze, self).__init__(**kwargs)
         self.up1 = UNetUp(576, 48, 64, (2,2), old=2)
         self.up2 = UNetUp(64, 24, 32, (4,4), old=2)
@@ -79,7 +81,7 @@ class OpenSeeFaceGaze(geffnet.mobilenetv3.MobileNetV3):
 # This is the face detection model. Because the landmark model is very robust, it gets away with predicting very rough bounding boxes. It is fully convolutional and can be made to run on different resolutions. It was trained on 224x224 crops and the most reasonable results can be found in the range of 224x224 to 640x640.
 class OpenSeeFaceDetect(geffnet.mobilenetv3.MobileNetV3):
     def __init__(self, size="large", channel_multiplier=0.1):
-        kwargs = geffnet.mobilenetv3._gen_mobilenet_v3([size], channel_multiplier=channel_multiplier)
+        kwargs = get_mobilenetv3_kwargs(size, channel_multiplier)
         super(OpenSeeFaceDetect, self).__init__(**kwargs)
         if size == "large":
             self.up1 = UNetUp(round_channels(960, channel_multiplier), round_channels(112, channel_multiplier), 256, (14,14), old=1)
@@ -133,7 +135,7 @@ def logit_arr(p, factor=16.0):
 # 3: "large", 1.0
 class OpenSeeFaceLandmarks(geffnet.mobilenetv3.MobileNetV3):
     def __init__(self, size="large", channel_multiplier=1.0, inference=False):
-        kwargs = geffnet.mobilenetv3._gen_mobilenet_v3([size], channel_multiplier=channel_multiplier)
+        kwargs = get_mobilenetv3_kwargs(size, channel_multiplier)
         super(OpenSeeFaceLandmarks, self).__init__(**kwargs)
         if size == "large":
             self.up1 = UNetUp(round_channels(960, channel_multiplier), round_channels(112, channel_multiplier), 256, (14,14))
@@ -181,76 +183,122 @@ class OpenSeeFaceLandmarks(geffnet.mobilenetv3.MobileNetV3):
     def forward(self, x):
         return self._forward_impl(x)
 
-# lm_modelT for 56x56 30 point inference
-class OpenSeeFaceLandmarks30Pt(geffnet.mobilenetv3.MobileNetV3):
-    def __init__(self, size="large", channel_multiplier=1.0, inference=False):
-        kwargs = geffnet.mobilenetv3._gen_mobilenet_v3([size], channel_multiplier=channel_multiplier)
-        super(OpenSeeFaceLandmarks30Pt, self).__init__(**kwargs)
-        self.up1 = UNetUp(960, 112, 256, (4,4))
-        self.up2 = UNetUp(256, 40, 180, (7,7))
-        self.group = DSConv2d(180, 90, kernels_per_layer=4, groups=3)
-        self.inference = inference
-    def _forward_impl(self, x):
-        x = self.conv_stem(x)
-        x = self.bn1(x)
-        x = self.act1(x)
-        r2 = None
-        r3 = None
-        for i, feature in enumerate(self.blocks):
-            x = feature(x)
-            if i == 4:
-                r3 = x
-            if i == 2:
-                r2 = x
-        x = self.up1(x, r3)
-        x = self.up2(x, r2)
-        x = self.group(x)
+def get_mobilenetv3_kwargs(variant, channel_multiplier = 1.0):
+    if 'small' in variant:
+        num_features = 1024
+        if 'minimal' in variant:
+            act_layer = 'relu'
+            arch_def = [
+                # stage 0, 112x112 in
+                ['ds_r1_k3_s2_e1_c16'],
+                # stage 1, 56x56 in
+                ['ir_r1_k3_s2_e4.5_c24', 'ir_r1_k3_s1_e3.67_c24'],
+                # stage 2, 28x28 in
+                ['ir_r1_k3_s2_e4_c40', 'ir_r2_k3_s1_e6_c40'],
+                # stage 3, 14x14 in
+                ['ir_r2_k3_s1_e3_c48'],
+                # stage 4, 14x14in
+                ['ir_r3_k3_s2_e6_c96'],
+                # stage 6, 7x7 in
+                ['cn_r1_k1_s1_c576'],
+            ]
+        else:
+            act_layer = 'hard_swish'
+            arch_def = [
+                # stage 0, 112x112 in
+                ['ds_r1_k3_s2_e1_c16_se0.25_nre'],  # relu
+                # stage 1, 56x56 in
+                ['ir_r1_k3_s2_e4.5_c24_nre', 'ir_r1_k3_s1_e3.67_c24_nre'],  # relu
+                # stage 2, 28x28 in
+                ['ir_r1_k5_s2_e4_c40_se0.25', 'ir_r2_k5_s1_e6_c40_se0.25'],  # hard-swish
+                # stage 3, 14x14 in
+                ['ir_r2_k5_s1_e3_c48_se0.25'],  # hard-swish
+                # stage 4, 14x14in
+                ['ir_r3_k5_s2_e6_c96_se0.25'],  # hard-swish
+                # stage 6, 7x7 in
+                ['cn_r1_k1_s1_c576'],  # hard-swish
+            ]
+    else:
+        num_features = 1280
+        if 'minimal' in variant:
+            act_layer = 'relu'
+            arch_def = [
+                # stage 0, 112x112 in
+                ['ds_r1_k3_s1_e1_c16'],
+                # stage 1, 112x112 in
+                ['ir_r1_k3_s2_e4_c24', 'ir_r1_k3_s1_e3_c24'],
+                # stage 2, 56x56 in
+                ['ir_r3_k3_s2_e3_c40'],
+                # stage 3, 28x28 in
+                ['ir_r1_k3_s2_e6_c80', 'ir_r1_k3_s1_e2.5_c80', 'ir_r2_k3_s1_e2.3_c80'],
+                # stage 4, 14x14in
+                ['ir_r2_k3_s1_e6_c112'],
+                # stage 5, 14x14in
+                ['ir_r3_k3_s2_e6_c160'],
+                # stage 6, 7x7 in
+                ['cn_r1_k1_s1_c960'],
+            ]
+        else:
+            act_layer = 'hard_swish'
+            arch_def = [
+                # stage 0, 112x112 in
+                ['ds_r1_k3_s1_e1_c16_nre'],  # relu
+                # stage 1, 112x112 in
+                ['ir_r1_k3_s2_e4_c24_nre', 'ir_r1_k3_s1_e3_c24_nre'],  # relu
+                # stage 2, 56x56 in
+                ['ir_r3_k5_s2_e3_c40_se0.25_nre'],  # relu
+                # stage 3, 28x28 in
+                ['ir_r1_k3_s2_e6_c80', 'ir_r1_k3_s1_e2.5_c80', 'ir_r2_k3_s1_e2.3_c80'],  # hard-swish
+                # stage 4, 14x14in
+                ['ir_r2_k3_s1_e6_c112_se0.25'],  # hard-swish
+                # stage 5, 14x14in
+                ['ir_r3_k5_s2_e6_c160_se0.25'],  # hard-swish
+                # stage 6, 7x7 in
+                ['cn_r1_k1_s1_c960'],  # hard-swish
+            ]
 
-        if self.inference:
-            t_main = x[:, 0:30].reshape((-1, 30, 7*7))
-            t_m = t_main.argmax(dim=2)
-            indices = t_m.unsqueeze(2)
-            t_conf = t_main.gather(2, indices).squeeze(2)
-            t_off_x = x[:, 30:60].reshape((-1, 30, 7*7)).gather(2, indices).squeeze(2)
-            t_off_y = x[:, 60:90].reshape((-1, 30, 7*7)).gather(2, indices).squeeze(2)
-            t_off_x = 55. * logit_arr(t_off_x, factor=8.0)
-            t_off_y = 55. * logit_arr(t_off_y, factor=8.0)
-            t_x = 55. * (t_m / 7.).floor() / 6. + t_off_x
-            t_y = 55. * t_m.remainder(7.).float() / 6. + t_off_y
-            x = (t_conf.mean(1), torch.stack([t_x, t_y, t_conf], 2))
-
-        return x
-    def forward(self, x):
-        return self._forward_impl(x)
-
+    return dict(
+        block_args=decode_arch_def(arch_def),
+        num_features=num_features,
+        stem_size=16,
+        channel_multiplier=channel_multiplier,
+        act_layer=resolve_act_layer({}, act_layer),
+        se_kwargs=dict(
+            act_layer=get_act_layer('relu'), gate_fn=get_act_fn('hard_sigmoid'), reduce_mid=True, divisor=8),
+        norm_kwargs={}
+    )
 
 # Checkpoint test
 if __name__== "__main__":
+    '''
+    set_layer_config(
+        scriptable=False,
+        exportable=False,
+        no_jit=False
+    )
+    '''
+    
     print("Checking gaze model")
     m=OpenSeeFaceGaze()
-    ckpt = torch.load("gaze.pth")
+    ckpt = torch.load("weights/gaze.pth")
     m.load_state_dict(ckpt)
     print("Checking detection model")
     m=OpenSeeFaceDetect()
-    ckpt = torch.load("detection.pth")
+    ckpt = torch.load("weights/detection.pth", map_location=torch.device('cpu'))
     m.load_state_dict(ckpt)
     print("Checking lm_model0 model")
     m=OpenSeeFaceLandmarks("small", 0.5)
-    ckpt = torch.load("lm_model0.pth")
+    ckpt = torch.load("weights/lm_model0.pth", map_location=torch.device('cpu'))
     m.load_state_dict(ckpt)
     print("Checking lm_model1 model")
     m=OpenSeeFaceLandmarks("small", 1.0)
-    ckpt = torch.load("lm_model1.pth")
+    ckpt = torch.load("weights/lm_model1.pth", map_location=torch.device('cpu'))
     m.load_state_dict(ckpt)
     print("Checking lm_model2 model")
     m=OpenSeeFaceLandmarks("large", 0.75)
-    ckpt = torch.load("lm_model2.pth")
+    ckpt = torch.load("weights/lm_model2.pth", map_location=torch.device('cpu'))
     m.load_state_dict(ckpt)
     print("Checking lm_model3 model")
     m=OpenSeeFaceLandmarks("large", 1.0)
-    ckpt = torch.load("lm_model3.pth")
-    m.load_state_dict(ckpt)
-    print("Checking lm_modelT model")
-    m=OpenSeeFaceLandmarks("large", 1.0)
-    ckpt = torch.load("lm_modelT.pth")
+    ckpt = torch.load("weights/lm_model3.pth", map_location=torch.device('cpu'))
     m.load_state_dict(ckpt)
