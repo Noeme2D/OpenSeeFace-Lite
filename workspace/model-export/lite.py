@@ -3,6 +3,7 @@ import cv2
 import time
 import torch
 from model import OpenSeeFaceDetect, OpenSeeFaceLandmarks
+from geffnet.config import set_layer_config
 
 # Input
 
@@ -153,6 +154,13 @@ if model_type < -1:
 # Settings
 
 # Models setup
+
+# so that geffnet.MobileNetV3 can be exported
+set_layer_config(
+    scriptable=True,
+    exportable=True,
+    no_jit=False
+)
 
 torch.no_grad()
 
@@ -351,7 +359,10 @@ def detect_face(frame):
     im = cv2.resize(frame, (224, 224), interpolation=cv2.INTER_LINEAR)[:,:,::-1] * std_224 + mean_224
     im = np.expand_dims(im, 0)
     im = np.transpose(im, (0,3,1,2))
-    
+
+    traced_detection_model = torch.jit.trace(detection_model, torch.from_numpy(im))
+    traced_detection_model.save("traced_detection_model.pt")
+
     outputs, maxpool = detection_model(torch.from_numpy(im))
     outputs = np.array(outputs.detach().numpy())
     maxpool = np.array(maxpool.detach().numpy())
@@ -387,6 +398,9 @@ def lm(frame, face):
     scale_y = float(crop_y2 - crop_y1) / res
     crop_0 = preprocess(frame, (crop_x1, crop_y1, crop_x2, crop_y2))
     crop_info_0 = (crop_x1, crop_y1, scale_x, scale_y, 0.1)
+
+    traced_lm_model = torch.jit.trace(detection_model, torch.from_numpy(crop_0))
+    traced_lm_model.save("traced_lm_model%d.pt" % model_type)
 
     output = lm_model(torch.from_numpy(crop_0))
     output = output.detach().numpy()
