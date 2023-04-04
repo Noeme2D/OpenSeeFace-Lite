@@ -1,7 +1,8 @@
 import numpy as np
 import cv2
 import time
-import onnxruntime
+import torch
+from model import OpenSeeFaceDetect, OpenSeeFaceLandmarks
 
 # Input
 
@@ -153,33 +154,27 @@ if model_type < -1:
 
 # Models setup
 
-options = onnxruntime.SessionOptions()
-options.inter_op_num_threads = 1
-options.intra_op_num_threads = 1
-options.execution_mode = onnxruntime.ExecutionMode.ORT_SEQUENTIAL
-options.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_ALL
-options.log_severity_level = 3
-providersList = onnxruntime.capi._pybind_state.get_available_providers()
+torch.no_grad()
 
-detection_model = onnxruntime.InferenceSession("models/mnv3_detection_opt.onnx", sess_options=options, providers=providersList)
+detection_model = OpenSeeFaceDetect()
+detection_model.load_state_dict(torch.load("weights/detection.pth", map_location=torch.device('cpu')))
+detection_model.eval()
 
-model_names = [
-    "lm_model0_opt.onnx",
-    "lm_model1_opt.onnx",
-    "lm_model2_opt.onnx",
-    "lm_model3_opt.onnx",
-    "lm_model4_opt.onnx"
-]
-model_name = "lm_modelT_opt.onnx"
-if model_type >= 0:
-    model_name = model_names[model_type]
-if model_type == -2:
-    model_name = "lm_modelV_opt.onnx"
-if model_type == -3:
-    model_name = "lm_modelU_opt.onnx"
-
-lm_model = onnxruntime.InferenceSession("models/"+model_name, sess_options=options, providers=providersList)
-lm_input_name = lm_model.get_inputs()[0].name 
+if model_type == 0 :
+    lm_model = OpenSeeFaceLandmarks("small", 0.5)
+    lm_model.load_state_dict(torch.load("weights/lm_model0.pth", map_location=torch.device('cpu')))
+elif model_type == 1:
+    lm_model = OpenSeeFaceLandmarks("small", 1.0)
+    lm_model.load_state_dict(torch.load("weights/lm_model1.pth", map_location=torch.device('cpu')))
+elif model_type == 2:
+    lm_model = OpenSeeFaceLandmarks("large", 0.75)
+    lm_model.load_state_dict(torch.load("weights/lm_model2.pth", map_location=torch.device('cpu')))
+elif model_type == 3:
+    lm_model = OpenSeeFaceLandmarks("large", 1.0)
+    lm_model.load_state_dict(torch.load("weights/lm_model3.pth", map_location=torch.device('cpu')))
+else:
+    assert False
+lm_model.eval()
 
 # Models setup
 
@@ -356,10 +351,11 @@ def detect_face(frame):
     im = cv2.resize(frame, (224, 224), interpolation=cv2.INTER_LINEAR)[:,:,::-1] * std_224 + mean_224
     im = np.expand_dims(im, 0)
     im = np.transpose(im, (0,3,1,2))
+    
+    outputs, maxpool = detection_model(torch.from_numpy(im))
+    outputs = np.array(outputs.detach().numpy())
+    maxpool = np.array(maxpool.detach().numpy())
 
-    outputs, maxpool = detection_model.run([], {'input': im})
-    outputs = np.array(outputs)
-    maxpool = np.array(maxpool)
     outputs[0, 0, outputs[0, 0] != maxpool[0, 0]] = 0
     detections = np.flip(np.argsort(outputs[0,0].flatten()))
     det = detections[0]
@@ -392,7 +388,8 @@ def lm(frame, face):
     crop_0 = preprocess(frame, (crop_x1, crop_y1, crop_x2, crop_y2))
     crop_info_0 = (crop_x1, crop_y1, scale_x, scale_y, 0.1)
 
-    output = lm_model.run([], {lm_input_name: crop_0})[0]
+    output = lm_model(torch.from_numpy(crop_0))
+    output = output.detach().numpy()
 
     # tracker.py:1151
     eye_state = [(1.0, 0.0, 0.0, 0.0), (1.0, 0.0, 0.0, 0.0)]
@@ -565,5 +562,5 @@ print("Tracker time used:", end_time - start_time)
 
 # assert face_info.success
 
-# print(features)
-# visualize(frame, face_info)
+print(features)
+visualize(frame, face_info)
