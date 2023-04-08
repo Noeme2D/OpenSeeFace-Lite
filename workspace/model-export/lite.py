@@ -1,6 +1,5 @@
 import numpy as np
 import cv2
-import time
 import torch
 from model import OpenSeeFaceDetect, OpenSeeFaceLandmarks
 from geffnet.config import set_layer_config
@@ -360,10 +359,17 @@ def detect_face(frame):
     im = np.expand_dims(im, 0)
     im = np.transpose(im, (0,3,1,2))
 
-    traced_detection_model = torch.jit.trace(detection_model, torch.from_numpy(im))
-    traced_detection_model.save("traced_detection_model.pt")
+    input_tensor = torch.from_numpy(im);
 
-    outputs, maxpool = detection_model(torch.from_numpy(im))
+    traced_detection_model = torch.jit.trace(detection_model, input_tensor)
+    traced_detection_model.save("traced_detection_model.pt")
+    torch.onnx.export(
+        traced_detection_model, input_tensor,
+        "detection_model.onnx",
+        input_names=["input"], output_names=["output"]
+    )
+
+    outputs, maxpool = detection_model(input_tensor)
     outputs = np.array(outputs.detach().numpy())
     maxpool = np.array(maxpool.detach().numpy())
 
@@ -399,10 +405,17 @@ def lm(frame, face):
     crop_0 = preprocess(frame, (crop_x1, crop_y1, crop_x2, crop_y2))
     crop_info_0 = (crop_x1, crop_y1, scale_x, scale_y, 0.1)
 
-    traced_lm_model = torch.jit.trace(detection_model, torch.from_numpy(crop_0))
-    traced_lm_model.save("traced_lm_model%d.pt" % model_type)
+    input_tensor = torch.from_numpy(crop_0)
 
-    output = lm_model(torch.from_numpy(crop_0))
+    traced_lm_model = torch.jit.trace(lm_model, input_tensor)
+    traced_lm_model.save("traced_lm_model%d.pt" % model_type)
+    torch.onnx.export(
+        traced_lm_model, input_tensor,
+        "lm_model%d.onnx" % model_type,
+        input_names=["input"], output_names=["output"]
+    )
+
+    output = lm_model(input_tensor)
     output = output.detach().numpy()
 
     # tracker.py:1151
@@ -556,8 +569,6 @@ def solve_features(pts):
 
 # Main
 
-start_time = time.perf_counter()
-
 face = detect_face(frame)
 conf, lms, eye_state = lm(frame, face)
 
@@ -571,10 +582,7 @@ face_info.success, face_info.quaternion, face_info.euler, face_info.pnp_error, f
 face_info.pts_3d = normalize_pts3d(face_info.pts_3d)
 features = solve_features(face_info.pts_3d[:, 0:2])
 
-end_time = time.perf_counter()
-print("Tracker time used:", end_time - start_time)
-
 # assert face_info.success
 
-print(features)
-visualize(frame, face_info)
+# print(features)
+# visualize(frame, face_info)
