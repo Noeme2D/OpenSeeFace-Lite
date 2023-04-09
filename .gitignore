@@ -1,4 +1,6 @@
 *.jpg
+*.onnx
+*.pt
 
 # System files
 .*
