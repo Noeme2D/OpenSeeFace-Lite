@@ -6,8 +6,8 @@ import onnxruntime
 # Input
 
 frame = cv2.imread("test-frame.jpg")
-width = frame.shape[0]
-height = frame.shape[1]
+width = frame.shape[1]
+height = frame.shape[0]
 
 # Input
 
@@ -374,8 +374,8 @@ def detect_face(frame):
         assert False
 
     result = np.array((x - r, y - r, 2 * r, 2 * r * 1.0)).astype(np.float32)
-    result[[0,2]] *= frame.shape[1] / 224.
-    result[[1,3]] *= frame.shape[0] / 224.
+    result[[0,2]] *= width / 224.
+    result[[1,3]] *= height / 224.
     
     return result
 
